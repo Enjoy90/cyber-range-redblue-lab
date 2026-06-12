@@ -60,7 +60,9 @@ fi
 # agar listen di 2275, jika ssh.socket memang dipakai.
 if systemctl list-unit-files 2>/dev/null | grep -q '^ssh\.socket'; then
   mkdir -p /etc/systemd/system/ssh.socket.d
-  printf '[Socket]\nListenStream=\nListenStream=%s\n' "$SSH_PORT" \
+  # Bind IPv4 (0.0.0.0) eksplisit -- bind port saja kadang IPv6-only,
+  # bikin klien IPv4 (mis. Windows) ditolak "Connection refused".
+  printf '[Socket]\nListenStream=\nListenStream=0.0.0.0:%s\n' "$SSH_PORT" \
     > /etc/systemd/system/ssh.socket.d/override.conf
   systemctl daemon-reload
   systemctl restart ssh.socket || true
