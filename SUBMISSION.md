@@ -59,7 +59,7 @@ SSH Blue Team di **port 2275**.
 
 | Service | Fungsi | Catatan |
 |---|---|---|
-| `nginx` | Reverse proxy di port 3075; menulis `access.log` & `error.log` format nginx | Pintu masuk Red Team |
+| `nginx` | Reverse proxy di port 3075; traffic live ditulis ke `access.live.log`/`error.live.log` (log forensik `access.log`/`error.log` di-seed oleh `inject_logs.py`) | Pintu masuk Red Team |
 | `app` | Node.js "Admin Feedback System" yang sengaja rentan | Semua flag Red tertanam di sini |
 | `admin-bot` | Browser headless (Playwright) yang berperan sbg admin korban | Memicu eksekusi Stored XSS |
 
@@ -282,8 +282,8 @@ di `X-Forwarded-For`) → sesi `adm_sess` di-replay dari IP penyerang pada 18:51
 
 **Opsi A — Otomatis penuh (cloud-init):**
 1. Buat VM Ubuntu 22.04 cloud image di Proxmox.
-2. Lampirkan `cloud-init/user-data` (set `<REPO_URL>` ke repo Anda; isi `passwd` dengan
-   hash `openssl passwd -6 'blue_team_rocks'`).
+2. Lampirkan `cloud-init/user-data` (cukup set `<REPO_URL>` ke repo Anda; password
+   user `analyst` di-set otomatis oleh `bootstrap.sh`).
 3. Boot VM → cloud-init membuat user `analyst`, set SSH 2275, clone repo, dan menjalankan
    `bootstrap.sh` (Docker + lab + inject log) otomatis.
 
