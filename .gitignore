@@ -12,6 +12,9 @@ data/
 # catatan belajar pribadi (jangan di-push ke repo publik)
 BELAJAR.md
 
+# tool generator dokumen (dipakai lokal saja)
+md2docx.py
+
 # log runtime
 logs/
 *.log
