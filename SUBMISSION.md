@@ -2,7 +2,7 @@
 ### Scenario: "Cookies Reuse & MFA Bypass" — Admin Feedback System
 
 **Role:** Cybersecurity Engineer (Lab & Range Developer)
-**Kandidat:** _[Isi nama Anda]_
+**Kandidat:** Endin Jorgy
 **Tanggal:** 12 Juni 2026
 **Repository:** https://github.com/Enjoy90/cyber-range-redblue-lab
 
