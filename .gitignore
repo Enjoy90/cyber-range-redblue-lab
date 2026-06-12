@@ -23,3 +23,7 @@ logs/
 # Hapus baris .docx di bawah kalau mau menyertakan laporan final di dalam repo.
 Cyber_Range_Submission.html
 Cyber_Range_Submission.docx
+
+# file lock/temp Microsoft Office
+~$*
+*.tmp
