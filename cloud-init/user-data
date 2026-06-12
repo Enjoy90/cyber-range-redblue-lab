@@ -1,31 +1,18 @@
 #cloud-config
-# =====================================================================
-#  cloud-init user-data  -  Provisioning OTOMATIS saat VM Proxmox boot
-# ---------------------------------------------------------------------
-#  Proxmox mendukung cloud-init secara native. Lampirkan file ini ke
-#  template VM Ubuntu (lihat docs Proxmox di README). Saat VM pertama
-#  kali boot, cloud-init akan:
-#    - membuat user Blue Team "analyst"
-#    - mengatur SSH di port 2275
-#    - meng-clone repo & menjalankan bootstrap.sh (Docker + lab + logs)
-#
-#  Ganti <REPO_URL> dengan URL Git repo Anda (GitHub/GitLab).
-# =====================================================================
+# Proxmox cloud-init: provisions the VM on first boot.
+# Replace <REPO_URL> with your Git repository URL.
 
 hostname: feedback-admin
 manage_etc_hosts: true
 
-# Blue Team user: analyst / blue_team_rocks
 users:
   - default
   - name: analyst
     groups: [adm, sudo]
     shell: /bin/bash
     lock_passwd: false
-    # Password (blue_team_rocks) di-set oleh scripts/bootstrap.sh via chpasswd
-    # pada runcmd di bawah, sehingga tidak perlu menaruh hash di sini.
+    # Password (blue_team_rocks) is set by scripts/bootstrap.sh (chpasswd).
 
-# SSH custom port 2275
 write_files:
   - path: /etc/ssh/sshd_config.d/99-range.conf
     content: |

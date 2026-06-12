@@ -1,14 +1,5 @@
-# =====================================================================
-#  DOCKER COMPOSE  -  Orkestrasi seluruh Cyber Range
-# ---------------------------------------------------------------------
-#  3 service:
-#    nginx     -> pintu depan port 3075, nulis access.log/error.log
-#    app       -> Node "Admin Feedback System" (vulnerable)
-#    admin-bot -> korban simulasi (memicu stored XSS)
-#
-#  Volume "adminlogs" dipetakan ke /opt/admin/logs supaya Blue Team
-#  (yang SSH ke VM di port 2275) bisa membaca log forensik.
-# =====================================================================
+# Orchestrates the lab: nginx (edge), app (Node), admin-bot (victim browser).
+# The shared volume exposes /opt/admin/logs to the host for the Blue Team.
 services:
 
   app:
@@ -38,7 +29,6 @@ services:
     networks:
       - range
     ports:
-      # Host VM port 3075 -> nginx 3075  (web app HTTP)
       - "3075:3075"
     restart: unless-stopped
 
@@ -56,7 +46,6 @@ services:
 
 volumes:
   adminlogs:
-    # Bind ke /opt/admin/logs di host VM supaya Blue Team gampang akses
     driver: local
     driver_opts:
       type: none

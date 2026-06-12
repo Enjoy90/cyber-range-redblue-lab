@@ -1,21 +1,9 @@
-/* =====================================================================
- *  ADMIN FEEDBACK SYSTEM  -  Vulnerable Web App (Node.js)
- *  Cyber Range "Red vs Blue" Lab  -  Scenario: Cookies Reuse & MFA Bypass
- * ---------------------------------------------------------------------
- *  PERINGATAN: Aplikasi ini SENGAJA dibuat rentan untuk lab/training
- *  terisolasi. JANGAN dijalankan di jaringan produksi/publik.
- * =====================================================================
- *
- *  CARA BACA FILE INI (buat belajar):
- *    // APA:        -> baris/blok ini ngapain
- *    // CELAH:      -> ini bagian kerentanan yang sengaja ditanam (penting!)
- *    // FLAG:       -> fakta yang jadi jawaban CTF (format SCENARIO75{...})
- *
- *  Alur serangan 3 fase yang didukung file ini:
- *    FASE 1 Recon          -> header, robots.txt, komentar HTML, cookie pre-mfa
- *    FASE 2 Defense Evasion -> WAF abal-abal + stored XSS + exfil cookie
- *    FASE 3 Initial Access  -> replay cookie adm_sess -> skip MFA -> flag final
- * ===================================================================== */
+/*
+ * Admin Feedback System
+ * Intentionally vulnerable web application for an isolated security training
+ * range (Cookies Reuse & MFA Bypass scenario). Do not deploy on production
+ * or public networks.
+ */
 
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -23,71 +11,40 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3075;            // FLAG: web app WAJIB di port 3075
+const PORT = process.env.PORT || 3075;
+const LOG_DIR = process.env.LOG_DIR || '/opt/admin/logs';
+try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch (e) {}
 
-// Lokasi log (Blue Team baca di sini). Default sesuai brief: /opt/admin/logs
-const LOG_DIR = process.env.LOG_DIR || '/opt/admin/logs';   // FLAG: SCENARIO75{/opt/admin/logs}
-try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch (e) { /* abaikan kalau gagal di dev */ }
-
-/* ---------------------------------------------------------------------
- *  LOGGER sederhana  ->  nulis ke /opt/admin/logs/app.log
- *  Catatan: log forensik UTAMA buat Blue Team disuntik oleh inject_logs.py
- *  (timeline serangan persis). Logger ini cuma buat aktivitas live runtime.
- * ------------------------------------------------------------------- */
 function logLine(file, line) {
   try { fs.appendFileSync(path.join(LOG_DIR, file), line + '\n'); } catch (e) {}
 }
 function clientIp(req) {
-  // X-Forwarded-For dipakai kalau ada nginx di depan; fallback ke socket
   return (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString();
 }
 
-/* =====================================================================
- *  MIDDLEWARE GLOBAL
- * ===================================================================== */
-
-// APA: matikan header default Express ("X-Powered-By: Express")...
 app.disable('x-powered-by');
-// ...lalu set manual jadi "Node.js" supaya bocor ke attacker pas recon.
-// CELAH (FASE 1): informasi teknologi backend sengaja dibocorkan.
-// FLAG: SCENARIO75{Node.js}
 app.use((req, res, next) => {
   res.setHeader('X-Powered-By', 'Node.js');
   next();
 });
 
-// Parser body form (POST feedback) + cookie
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(cookieParser());
 
-// APA: catat tiap request + terbitkan cookie pre-MFA kalau belum ada
+// Issue baseline cookies to every visitor.
 app.use((req, res, next) => {
-  // CELAH (FASE 1+2): cookie sesi PRA-autentikasi dengan HttpOnly = false.
-  //   - Namanya persis: pre_mfa_session         -> FLAG: SCENARIO75{pre_mfa_session}
-  //   - Nilainya persis: pending_mfa_verification -> FLAG: SCENARIO75{pending_mfa_verification}
-  //   - HttpOnly: false                          -> FLAG: SCENARIO75{False}
-  // Karena HttpOnly false, JavaScript (XSS) BISA baca cookie ini lewat document.cookie.
   if (!req.cookies['pre_mfa_session']) {
     res.cookie('pre_mfa_session', 'pending_mfa_verification', {
-      httpOnly: false,   // <-- inilah kerentanannya
-      sameSite: 'Lax',
-      path: '/',
+      httpOnly: false, sameSite: 'Lax', path: '/',
     });
   }
-
-  // Terbitkan cookie 'sess' untuk SEMUA pengunjung (termasuk tamu) supaya
-  // cookie ini SELALU ADA, bahkan tanpa login. Tamu dapat nilai 'guest_...'
-  // (tidak berprivilege). Admin yang lolos MFA akan MENIMPA 'sess' dengan
-  // nilai 'adm_sess_...'. => Attacker tinggal mengganti nilai 'sess' miliknya
-  // dengan 'adm_sess_...' curian untuk menjadi admin (session replay).
+  // Guests get a non-privileged 'sess'; it is upgraded to an admin value after MFA.
   if (!req.cookies['sess']) {
     res.cookie('sess', 'guest_' + Math.random().toString(16).slice(2), {
       httpOnly: false, sameSite: 'Lax', path: '/',
     });
   }
-
-  // Log akses ringkas (runtime). Forensik resmi tetap dari inject_logs.py.
   res.on('finish', () => {
     const ts = new Date().toISOString();
     logLine('access.runtime.log',
@@ -96,93 +53,49 @@ app.use((req, res, next) => {
   next();
 });
 
-/* =====================================================================
- *  SESSION STORE (in-memory)
- *  Menyimpan sesi admin yang sudah lolos MFA.
- *  key   = nilai cookie session (diawali prefix "adm_sess")
- *  value = { authed: true, issuedIp, createdAt }
- * ===================================================================== */
+// In-memory store of authenticated admin sessions: token -> { authed, issuedIp, createdAt }
 const adminSessions = new Map();
 
-// Kredensial admin (lab). OTP statis biar mudah didemokan.
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'Superadmin123';
 const ADMIN_OTP = '135790';
 
-// Penyimpanan feedback (stored XSS): tiap entri tampil di /dashboard.
-// "Database" sederhana berbasis file JSON -> review AWET walau server restart.
+// Review storage, persisted to a JSON file so data survives restarts.
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'reviews.json');
 let feedbacks = [];
-let feedbackSeq = 0;   // ID auto-increment untuk referensi hapus
+let feedbackSeq = 0;
 
-// Baca data dari file JSON saat startup (kalau ada).
 function loadFeedbacks() {
   try {
     const arr = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     if (Array.isArray(arr)) {
       feedbacks = arr;
-      // lanjutkan ID dari yang terbesar supaya tidak bentrok
       feedbackSeq = feedbacks.reduce((max, f) => Math.max(max, f.id || 0), 0);
     }
-  } catch (e) { /* file belum ada / korup -> mulai dari kosong */ }
+  } catch (e) {}
 }
-
-// Simpan seluruh review ke file JSON (dipanggil tiap ada perubahan).
 function saveFeedbacks() {
   try {
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
     fs.writeFileSync(DATA_FILE, JSON.stringify(feedbacks, null, 2));
-  } catch (e) { console.error('[db] gagal menyimpan reviews.json:', e.message); }
+  } catch (e) { console.error('[db] failed to save reviews.json:', e.message); }
 }
+loadFeedbacks();
 
-loadFeedbacks();   // muat data lama begitu server start
-
-// Helper: bikin token sesi admin dengan PREFIX wajib "adm_sess"
-// FLAG: SCENARIO75{adm_sess}
 function newAdminSessionToken() {
   const rand = Math.random().toString(16).slice(2) + Date.now().toString(16);
-  return 'adm_sess_' + rand;   // contoh: adm_sess_3f9a1c...   (prefix = adm_sess)
+  return 'adm_sess_' + rand;
 }
 
-/* =====================================================================
- *  WAF ABAL-ABAL (rudimentary Web Application Firewall)
- *  Dipakai HANYA pada input feedback (FASE 2).
- *  Tujuan brief: keliatan "aman" tapi gampang di-bypass.
- * ===================================================================== */
+// Lightweight request filter applied to review submissions.
 function waf(payload) {
   const p = String(payload);
-
-  // CELAH WAF #1: cuma blok tag <script> mentah.
-  //   -> Red Team tinggal pakai tag HTML5 lain (<svg onload=...>) buat lolos.
-  //   FLAG (diblok): SCENARIO75{<script>}  | status balasan: SCENARIO75{403}
-  //   FLAG (bypass): SCENARIO75{<svg>}
-  if (/<script/i.test(p)) {
-    return { blocked: true, rule: 'script-tag' };
-  }
-
-  // CELAH WAF #2: blok KATA kunci "document" & "cookie" secara mentah.
-  //   -> Maksudnya nyegah pencurian cookie, tapi Red Team nyamarin pakai
-  //      bracket notation:  window['docu'+'ment']['coo'+'kie']
-  //      String itu TIDAK mengandung kata utuh "document"/"cookie" -> lolos.
-  //   FLAG: SCENARIO75{window['docu'+'ment']['coo'+'kie']}
-  if (/document/i.test(p) || /cookie/i.test(p)) {
-    return { blocked: true, rule: 'keyword' };
-  }
-
-  // CELAH WAF #3 (implisit): tidak ada Content-Security-Policy, dan tidak
-  //   memblok 'fetch' -> Red Team bebas exfiltrasi cookie via fetch().
-  //   FLAG: SCENARIO75{fetch}
+  if (/<script/i.test(p)) return { blocked: true, rule: 'script-tag' };
+  if (/document/i.test(p) || /cookie/i.test(p)) return { blocked: true, rule: 'keyword' };
   return { blocked: false };
 }
 
-/* =====================================================================
- *  ROUTES
- * ===================================================================== */
-
-// ---- robots.txt -----------------------------------------------------
-// CELAH (FASE 1): membocorkan path tersembunyi ke attacker.
-// FLAG: SCENARIO75{/api/verify-mfa}  dan  SCENARIO75{/dashboard}
-// --- Helper tema gelap untuk halaman admin (TIDAK mengubah logika/flag) ---
+// Shared dark-theme shell for admin pages.
 const ADMIN_CSS = `
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#e8eefc;min-height:100vh;
@@ -245,10 +158,8 @@ Disallow: /dashboard
 `);
 });
 
-// ---- Halaman utama (landing + form feedback) ------------------------
+// Public landing page with the review form.
 app.get('/', (req, res) => {
-  // CELAH (FASE 1): komentar ASCII art di source HTML yang "ngode" cek robots.txt
-  // FLAG: SCENARIO75{robots.txt}
   res.type('html').send(`<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -303,9 +214,7 @@ app.get('/', (req, res) => {
 </style>
 </head>
 <body>
-<!--
-Robots are polite crawlers... have you read our /robots.txt ?
--->
+<!-- Robots are polite crawlers... have you read our /robots.txt ? -->
   <nav>
     <div class="brand">&#9670; Nauli Feedback</div>
     <div class="navlinks">
@@ -341,27 +250,21 @@ Robots are polite crawlers... have you read our /robots.txt ?
 </html>`);
 });
 
-// ---- Endpoint submit feedback ---------------------------------------
-// FLAG: endpoint ini EKSKLUSIF pakai POST -> SCENARIO75{POST}
+// Review submission (POST only).
 app.post('/feedback', (req, res) => {
   const name = req.body.name || 'anon';
   const message = req.body.message || '';
 
-  // Jalankan WAF pada isi pesan
   const verdict = waf(message);
   if (verdict.blocked) {
-    // CELAH (FASE 2): payload <script> diblok -> balas 403.
-    // FLAG: SCENARIO75{403}
     logLine('error.runtime.log',
       `[WAF] blocked rule=${verdict.rule} ip=${clientIp(req)} payload=${message}`);
     return res.status(403).type('html').send(
       '<h1>403 Forbidden</h1><p>Request blocked by WAF (suspicious content detected).</p>');
   }
 
-  // Lolos WAF -> SIMPAN mentah-mentah (stored XSS, tidak ada sanitasi).
-  // CELAH (FASE 2): input disimpan & nanti ditampilkan tanpa escaping.
   feedbacks.push({ id: ++feedbackSeq, name, message, ip: clientIp(req), at: new Date().toISOString() });
-  saveFeedbacks();   // persist ke reviews.json
+  saveFeedbacks();
   res.type('html').send(`<!DOCTYPE html><html lang="id"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Terima Kasih</title>
 <style>
@@ -389,12 +292,11 @@ app.post('/feedback', (req, res) => {
 </body></html>`);
 });
 
-// Method selain POST pada /feedback -> 405 (memperkuat "exclusively POST")
 app.all('/feedback', (req, res) => {
   res.status(405).type('text').send('405 Method Not Allowed - gunakan POST');
 });
 
-// ---- Login admin (langkah 1: password) ------------------------------
+// Admin login (step 1: password).
 app.get('/login', (req, res) => {
   res.type('html').send(adminShell('Admin Login', `
   <div class="auth-wrap"><div class="auth-card">
@@ -414,8 +316,6 @@ app.get('/login', (req, res) => {
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
   if (username === ADMIN_USER && password === ADMIN_PASS) {
-    // Password benar -> tandai sesi pra-MFA "password_ok", arahkan ke MFA.
-    // (Sesi ini masih pakai pre_mfa_session = pending_mfa_verification)
     res.cookie('pwd_stage', 'ok', { httpOnly: false, sameSite: 'Lax', path: '/' });
     logLine('auth.runtime.log', `[AUTH] password OK user=${username} ip=${clientIp(req)}`);
     return res.redirect('/mfa');
@@ -430,7 +330,7 @@ app.post('/login', (req, res) => {
   </div></div>`));
 });
 
-// ---- Halaman MFA (langkah 2: OTP) -----------------------------------
+// Admin login (step 2: OTP).
 app.get('/mfa', (req, res) => {
   res.type('html').send(adminShell('Verifikasi MFA', `
   <div class="auth-wrap"><div class="auth-card">
@@ -445,9 +345,6 @@ app.get('/mfa', (req, res) => {
   </div></div>`));
 });
 
-// ---- Endpoint verifikasi MFA ----------------------------------------
-// CATATAN PENTING (FASE 3): inilah endpoint yang DI-SKIP saat session replay.
-// FLAG: SCENARIO75{/api/verify-mfa}
 app.post('/api/verify-mfa', (req, res) => {
   if (req.cookies['pwd_stage'] !== 'ok') {
     return res.status(403).type('html').send(adminShell('403 Forbidden', `
@@ -459,12 +356,8 @@ app.post('/api/verify-mfa', (req, res) => {
     </div></div>`));
   }
   if (req.body.otp === ADMIN_OTP) {
-    // MFA sukses -> terbitkan sesi admin ber-prefix adm_sess.
     const token = newAdminSessionToken();
     adminSessions.set(token, { authed: true, issuedIp: clientIp(req), createdAt: Date.now() });
-
-    // CELAH (FASE 3): cookie sesi admin TIDAK HttpOnly -> bisa dicuri XSS,
-    //   dan TIDAK diikat ke device/IP -> bisa di-replay dari mana saja.
     res.cookie('sess', token, { httpOnly: false, sameSite: 'Lax', path: '/' });
     logLine('auth.runtime.log', `[AUTH] MFA OK -> issued ${token} ip=${clientIp(req)}`);
     return res.redirect('/dashboard');
@@ -478,43 +371,29 @@ app.post('/api/verify-mfa', (req, res) => {
   </div></div>`));
 });
 
-// ---- Dashboard admin (area terbatas) --------------------------------
-// FLAG: lokasi area admin -> SCENARIO75{/dashboard}
+// Restricted admin dashboard. Authorization checks only the session cookie.
 app.get('/dashboard', (req, res) => {
   const token = req.cookies['sess'] || '';
 
-  // Cegah caching: setelah logout, tombol "Back" browser HARUS minta ulang ke
-  // server. Karena sesi sudah dihapus + cookie dibersihkan, request ulang itu
-  // akan gagal otorisasi dan di-redirect ke /login (dashboard tak bisa di-back).
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
 
-  // CELAH INTI (FASE 3 - MFA Bypass via Session Replay):
-  //   Otorisasi /dashboard HANYA mengecek validitas cookie sesi 'adm_sess'.
-  //   TIDAK PERNAH memanggil/mengecek /api/verify-mfa pada request ini.
-  //   => Siapa pun yang me-replay cookie adm_sess curian langsung masuk,
-  //      MELEWATI MFA sepenuhnya.
   const sess = adminSessions.get(token);
   const isAdmin = !!(sess && sess.authed && token.startsWith('adm_sess'));
-
   if (!isAdmin) {
     return res.status(302).redirect('/login');
   }
 
-  // Deteksi sederhana untuk telemetry: cookie dipakai dari IP berbeda
-  // dari IP penerbit -> indikasi session replay / cookie reuse (CRITICAL).
+  // Flag a session used from a different IP than it was issued to.
   if (sess.issuedIp && clientIp(req) && clientIp(req) !== sess.issuedIp) {
     logLine('error.runtime.log',
       `[CRITICAL] Authentication bypass anomaly: cookie reuse ${token} issued_ip=${sess.issuedIp} replay_ip=${clientIp(req)}`);
   }
 
-  // Render feedback TANPA sanitasi -> stored XSS tereksekusi di sini.
-  // CELAH (FASE 3 - Visual Confirmation): payload dipantulkan di dalam
-  //   container ber-class "xss-payload".  FLAG: SCENARIO75{xss-payload}
   const feedbackHtml = feedbacks.map(f =>
     `<div class="xss-payload"><div class="review-row">` +
-      `<div class="content"><b>${f.name}</b>: ${f.message}</div>` +   // <-- ${f.message} mentah = XSS
+      `<div class="content"><b>${f.name}</b>: ${f.message}</div>` +
       `<form method="POST" action="/dashboard/delete" style="margin:0">` +
         `<input type="hidden" name="id" value="${f.id}">` +
         `<button class="del" type="submit">Hapus</button>` +
@@ -536,30 +415,24 @@ app.get('/dashboard', (req, res) => {
     <h1>Admin Dashboard</h1>
     <p class="muted">Daftar review masuk dari pengguna:</p>
     ${feedbackHtml || '<div class="empty">(belum ada review masuk)</div>'}
-    <!-- FLAG FINAL RED TEAM tertanam di area admin terdalam: -->
-    <!-- SCENARIO75{RED_C00k13_MFA_Byp4ss_0wn3d} -->
     <div id="vault" style="display:none">SCENARIO75{RED_C00k13_MFA_Byp4ss_0wn3d}</div>
   </div>`));
 });
 
-// ---- Logout: hapus sesi DI SERVER (benar-benar keluar) --------------
-//  Menghapus token dari adminSessions = invalidasi sesi sisi server.
-//  Walau attacker/back-button masih bawa cookie lama, token itu sudah
-//  tidak valid -> /dashboard menolak & redirect ke /login.
+// Logout invalidates the session server-side and clears cookies.
 function doLogout(req, res) {
   const token = req.cookies['sess'] || '';
-  if (token) adminSessions.delete(token);          // invalidasi sesi server-side
+  if (token) adminSessions.delete(token);
   res.clearCookie('sess', { path: '/' });
   res.clearCookie('pwd_stage', { path: '/' });
   logLine('auth.runtime.log', `[AUTH] logout token=${token} ip=${clientIp(req)}`);
   res.redirect('/login');
 }
 app.post('/logout', doLogout);
-app.get('/logout', doLogout);   // dukung juga via URL langsung
+app.get('/logout', doLogout);
 
-// ---- Hapus review (admin only) --------------------------------------
+// Delete a review (admin only).
 app.post('/dashboard/delete', (req, res) => {
-  // Otorisasi sama seperti /dashboard: harus sesi adm_sess yang valid.
   const token = req.cookies['sess'] || '';
   const sess = adminSessions.get(token);
   const isAdmin = !!(sess && sess.authed && token.startsWith('adm_sess'));
@@ -569,15 +442,12 @@ app.post('/dashboard/delete', (req, res) => {
   const idx = feedbacks.findIndex(f => f.id === id);
   if (idx !== -1) {
     feedbacks.splice(idx, 1);
-    saveFeedbacks();   // persist perubahan ke reviews.json
+    saveFeedbacks();
     logLine('auth.runtime.log', `[ADMIN] deleted review id=${id} ip=${clientIp(req)}`);
   }
   res.redirect('/dashboard');
 });
 
-/* =====================================================================
- *  START
- * ===================================================================== */
 app.listen(PORT, () => {
   console.log(`[admin-feedback-system] listening on http://0.0.0.0:${PORT}`);
   console.log(`[admin-feedback-system] logs -> ${LOG_DIR}`);

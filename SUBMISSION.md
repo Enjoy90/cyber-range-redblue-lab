@@ -333,5 +333,6 @@ Bila ini sistem nyata, perbaikan yang direkomendasikan:
 | Session replay lintas-IP | Ikat sesi ke device/IP/fingerprint; **regenerasi token setelah MFA**; idle/absolute timeout |
 | MFA hanya di awal | Validasi status MFA pada setiap akses sumber daya sensitif (step-up auth) |
 
-<!-- LAMPIRAN_KODE_OTOMATIS: bagian Lampiran A (source code) ditambahkan otomatis
-     oleh md2docx.py dengan membaca berkas sumber asli, sehingga selalu sinkron. -->
+<!-- Lampiran A (source code lengkap) disertakan pada dokumen final (DOCX/PDF)
+     dan tersedia utuh di repository: app/, admin-bot/, nginx/, scripts/,
+     cloud-init/, dan docker-compose.yml. -->

