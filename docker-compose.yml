@@ -1,0 +1,68 @@
+# =====================================================================
+#  DOCKER COMPOSE  -  Orkestrasi seluruh Cyber Range
+# ---------------------------------------------------------------------
+#  3 service:
+#    nginx     -> pintu depan port 3075, nulis access.log/error.log
+#    app       -> Node "Admin Feedback System" (vulnerable)
+#    admin-bot -> korban simulasi (memicu stored XSS)
+#
+#  Volume "adminlogs" dipetakan ke /opt/admin/logs supaya Blue Team
+#  (yang SSH ke VM di port 2275) bisa membaca log forensik.
+# =====================================================================
+services:
+
+  app:
+    build: ./app
+    container_name: range-app
+    environment:
+      - PORT=3075
+      - LOG_DIR=/opt/admin/logs
+    volumes:
+      - adminlogs:/opt/admin/logs
+    networks:
+      range:
+        aliases:
+          - feedback.admin.local
+    expose:
+      - "3075"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: range-nginx
+    depends_on:
+      - app
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - adminlogs:/opt/admin/logs
+    networks:
+      - range
+    ports:
+      # Host VM port 3075 -> nginx 3075  (web app HTTP)
+      - "3075:3075"
+    restart: unless-stopped
+
+  admin-bot:
+    build: ./admin-bot
+    container_name: range-admin-bot
+    depends_on:
+      - nginx
+    environment:
+      - TARGET_URL=http://nginx:3075
+      - INTERVAL_MS=8000
+    networks:
+      - range
+    restart: unless-stopped
+
+volumes:
+  adminlogs:
+    # Bind ke /opt/admin/logs di host VM supaya Blue Team gampang akses
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/admin/logs
+
+networks:
+  range:
+    driver: bridge

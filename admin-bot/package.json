@@ -1,0 +1,10 @@
+{
+  "name": "admin-bot",
+  "version": "1.0.0",
+  "description": "Simulated admin victim - logs in (with MFA) then opens /dashboard so stored XSS fires",
+  "main": "bot.js",
+  "scripts": { "start": "node bot.js" },
+  "dependencies": {
+    "playwright": "^1.45.0"
+  }
+}

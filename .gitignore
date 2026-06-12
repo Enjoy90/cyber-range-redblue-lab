@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# python cache
+__pycache__/
+*.pyc
+
+# database review lokal (data uji-coba, jangan commit)
+app/data/
+data/
+
+# catatan belajar pribadi (jangan di-push ke repo publik)
+BELAJAR.md
+
+# log runtime
+logs/
+*.log
+
+# artefak dokumen hasil generate (di-generate dari SUBMISSION.md via md2docx.py)
+# Hapus baris .docx di bawah kalau mau menyertakan laporan final di dalam repo.
+Cyber_Range_Submission.html
+Cyber_Range_Submission.docx
